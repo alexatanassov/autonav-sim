@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "A* Module",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "planner.a_star",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true
+    }
+  ]
+}
