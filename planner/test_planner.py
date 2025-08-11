@@ -1,17 +1,17 @@
 """
 test_planner.py
 
-Provides sanity for check for map methods and ensures that
-GridMap and A* are working correcty 
+Provides sanity check for map methods and ensures that
+GridMap and A* are working correctly.
 """
 
 from .grid_map import GridMap
 from .a_star import a_star
 from typing import List, Tuple, Optional
-from .utils import manhattan
+from .heuristics import manhattan, octile
 
 # -------------------
-# Your original tests
+# Original tests
 # -------------------
 
 def test_grid_map():
@@ -26,14 +26,13 @@ def test_grid_map():
     assert not gm.is_occupied((2,2))
 
     # coordinate round trips
-    # grid (0,0) -> world (0.5,0.5)
-    assert gm.grid_to_world((0,0)) == (0.5, 0.5)
-    # world (0.5,0.5) -> grid (0,0)
-    assert gm.world_to_grid(0.5, 0.5) == (0,0)
+    assert gm.grid_to_world((0,0)) == (0.5, 0.5)  # grid -> world
+    assert gm.world_to_grid(0.5, 0.5) == (0,0)    # world -> grid
 
     neighbors = gm.get_neighbors((1,1), connectivity=4)
     assert (0,1) in neighbors
     assert (1,0) in neighbors
+
 
 def test_a_star():
     gm = GridMap(width=10, height=10, resolution=1.0, origin=(0,0))
@@ -53,7 +52,6 @@ def test_a_star():
     )
 
     assert path is not None, "A* failed to find a path when one exists"
-
     assert path[0] == start, "Path does not start at the start cell"
     assert path[-1] == goal, "Path does not end at the goal cell"
 
@@ -62,15 +60,8 @@ def test_a_star():
         "Path did not route around the obstacle wall at column 5"
     )
 
-if __name__ == "__main__":
-    # When you run this file directly (test_planner.py),
-    # execute both tests and report success.
-    test_grid_map()
-    test_a_star()
-    print("All planner tests passed!")
-
 # ------------------------
-# Additional test coverage
+# Additional tests
 # ------------------------
 
 import math
@@ -79,11 +70,6 @@ def _euclidean(a, b):
     di = a[0] - b[0]
     dj = a[1] - b[1]
     return math.hypot(di, dj)
-
-def _octile(a, b):
-    di = abs(a[0] - b[0])
-    dj = abs(a[1] - b[1])
-    return (di + dj) - (math.sqrt(2.0) - 1.0) * min(di, dj)
 
 def _cost4(u, v):
     return 1.0
@@ -115,46 +101,43 @@ def test_8_connectivity_shorter_or_equal_than_4():
     start, goal = (0, 0), (19, 19)
 
     p4 = a_star(gm, start, goal, heuristic=manhattan, cost_fn=_cost4, connectivity=4)
-    p8 = a_star(gm, start, goal, heuristic=_octile,   cost_fn=_cost8, connectivity=8)
+    p8 = a_star(gm, start, goal, heuristic=octile,   cost_fn=_cost8, connectivity=8)
 
     assert p4 is not None and p8 is not None
-    # Compare number of steps (edges): len(path)-1
     steps4 = len(p4) - 1
     steps8 = len(p8) - 1
     assert steps8 <= steps4, f"Expected 8-conn path to be no longer in steps (got {steps8} vs {steps4})"
 
-
 def test_diagonal_corner_cut_prevention():
     """
-    With obstacles at (1,0) and (0,1), moving diagonally from (0,0)->(1,1)
+    With obstacles at (1,0) and (0,1), moving diagonally (0,0)->(1,1)
     should be disallowed when both orthogonal adjacents are blocked.
-    On a tiny map, that means no path exists.
+    On this tiny map, that means no path exists.
     """
     gm = GridMap(width=3, height=3, resolution=1.0)
     start, goal = (0, 0), (1, 1)
     gm.set_obstacle((1, 0))
     gm.set_obstacle((0, 1))
 
-    path = a_star(gm, start, goal, heuristic=_octile, cost_fn=_cost8, connectivity=8)
+    path = a_star(gm, start, goal, heuristic=octile, cost_fn=_cost8, connectivity=8)
     assert path is None, "Diagonal corner-cut should be blocked; expected no path"
 
 
 def test_inflation_blocks_narrow_corridor():
     """
-    If a 1-cell corridor exists and we inflate obstacles by 1 cell,
-    the corridor should become blocked and A* should return None.
+    A 1-cell corridor should close when we inflate obstacles by 1 cell.
     """
     gm = GridMap(width=7, height=5, resolution=1.0)
-    # Build two walls with a single-cell corridor in the middle row
+    # Two walls with a single-cell gap at column 3 on rows 1 and 3
     for j in range(7):
-        if j != 3:  # leave a 1-cell gap at column 3
+        if j != 3:
             gm.set_obstacle((1, j))
             gm.set_obstacle((3, j))
 
     start, goal = (0, 3), (4, 3)
-    # Sanity: without inflation, path should exist
+    # Sanity check
     p_no_infl = a_star(gm, start, goal, heuristic=manhattan, cost_fn=_cost4, connectivity=4)
-    assert p_no_infl is not None
+    assert p_no_infl is not None, "Path should exist before inflation"
 
     # Inflate obstacles -> corridor closes
     gm.inflate(radius_cells=1)
