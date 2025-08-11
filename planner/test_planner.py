@@ -10,6 +10,10 @@ from .a_star import a_star
 from typing import List, Tuple, Optional
 from .utils import manhattan
 
+# -------------------
+# Your original tests
+# -------------------
+
 def test_grid_map():
     gm = GridMap(width=5, height=5, resolution=1.0, origin=(0,0))
 
@@ -64,3 +68,95 @@ if __name__ == "__main__":
     test_grid_map()
     test_a_star()
     print("All planner tests passed!")
+
+# ------------------------
+# Additional test coverage
+# ------------------------
+
+import math
+
+def _euclidean(a, b):
+    di = a[0] - b[0]
+    dj = a[1] - b[1]
+    return math.hypot(di, dj)
+
+def _octile(a, b):
+    di = abs(a[0] - b[0])
+    dj = abs(a[1] - b[1])
+    return (di + dj) - (math.sqrt(2.0) - 1.0) * min(di, dj)
+
+def _cost4(u, v):
+    return 1.0
+
+def _cost8(u, v):
+    di = abs(u[0] - v[0])
+    dj = abs(u[1] - v[1])
+    return math.sqrt(2.0) if di == 1 and dj == 1 else 1.0
+
+
+def test_blocked_start_or_goal_returns_none():
+    gm = GridMap(width=6, height=6, resolution=1.0)
+    start, goal = (1, 1), (4, 4)
+
+    gm.set_obstacle(start)
+    assert a_star(gm, start, goal, heuristic=_euclidean, cost_fn=_cost4, connectivity=4) is None
+
+    gm.clear_cell(start)
+    gm.set_obstacle(goal)
+    assert a_star(gm, start, goal, heuristic=_euclidean, cost_fn=_cost4, connectivity=4) is None
+
+
+def test_8_connectivity_shorter_or_equal_than_4():
+    """
+    In an empty map, an 8-connected planner should need
+    fewer or equal *steps* to reach a diagonal goal than a 4-connected planner.
+    """
+    gm = GridMap(width=20, height=20, resolution=1.0)
+    start, goal = (0, 0), (19, 19)
+
+    p4 = a_star(gm, start, goal, heuristic=manhattan, cost_fn=_cost4, connectivity=4)
+    p8 = a_star(gm, start, goal, heuristic=_octile,   cost_fn=_cost8, connectivity=8)
+
+    assert p4 is not None and p8 is not None
+    # Compare number of steps (edges): len(path)-1
+    steps4 = len(p4) - 1
+    steps8 = len(p8) - 1
+    assert steps8 <= steps4, f"Expected 8-conn path to be no longer in steps (got {steps8} vs {steps4})"
+
+
+def test_diagonal_corner_cut_prevention():
+    """
+    With obstacles at (1,0) and (0,1), moving diagonally from (0,0)->(1,1)
+    should be disallowed when both orthogonal adjacents are blocked.
+    On a tiny map, that means no path exists.
+    """
+    gm = GridMap(width=3, height=3, resolution=1.0)
+    start, goal = (0, 0), (1, 1)
+    gm.set_obstacle((1, 0))
+    gm.set_obstacle((0, 1))
+
+    path = a_star(gm, start, goal, heuristic=_octile, cost_fn=_cost8, connectivity=8)
+    assert path is None, "Diagonal corner-cut should be blocked; expected no path"
+
+
+def test_inflation_blocks_narrow_corridor():
+    """
+    If a 1-cell corridor exists and we inflate obstacles by 1 cell,
+    the corridor should become blocked and A* should return None.
+    """
+    gm = GridMap(width=7, height=5, resolution=1.0)
+    # Build two walls with a single-cell corridor in the middle row
+    for j in range(7):
+        if j != 3:  # leave a 1-cell gap at column 3
+            gm.set_obstacle((1, j))
+            gm.set_obstacle((3, j))
+
+    start, goal = (0, 3), (4, 3)
+    # Sanity: without inflation, path should exist
+    p_no_infl = a_star(gm, start, goal, heuristic=manhattan, cost_fn=_cost4, connectivity=4)
+    assert p_no_infl is not None
+
+    # Inflate obstacles -> corridor closes
+    gm.inflate(radius_cells=1)
+    p_infl = a_star(gm, start, goal, heuristic=manhattan, cost_fn=_cost4, connectivity=4)
+    assert p_infl is None, "Inflation should have closed the corridor"
