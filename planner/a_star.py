@@ -1,78 +1,99 @@
 # planner/a_star.py
 
 import heapq
+import itertools
 from typing import Callable, Dict, List, Optional, Tuple
 from .grid_map import GridMap
 
+Cell = Tuple[int, int]
+Heuristic = Callable[[Cell, Cell], float]
+CostFn = Callable[[Cell, Cell], float]
+
+
 def reconstruct_path(
-    came_from: Dict[Tuple[int, int], Tuple[int, int]],
-    current: Tuple[int, int]    
-) -> List[Tuple[int, int]]:
-    """
-    Rebuild the path by walking backwards from the goal to star
-    """
+    came_from: Dict[Cell, Cell],
+    current: Cell
+) -> List[Cell]:
+    """Rebuild path by walking back from goal to start."""
     path = [current]
     while current in came_from:
         current = came_from[current]
         path.append(current)
-    return list(reversed(path))
+    path.reverse()
+    return path
+
 
 def a_star(
     grid_map: GridMap,
-    start: Tuple[int, int],
-    goal: Tuple[int, int],
-    heuristic: Callable[[Tuple[int, int], Tuple[int, int]], float],
-    cost_fn: Callable[[Tuple[int, int], Tuple[int, int]], float],
-    connectivity: int = 4
-) -> Optional[List[Tuple[int, int]]]: 
+    start: Cell,
+    goal: Cell,
+    heuristic: Heuristic,
+    cost_fn: CostFn,
+    connectivity: int = 4,
+    max_expansions: Optional[int] = None,
+) -> Optional[List[Cell]]:
     """
-    Perform A* search on a GridMap.
+    A* search on a GridMap.
 
     Parameters
     ----------
-    grid_map:
-        An instance of GridMap
-    start:
-        (i, j) grid indices where search begins 
-    end:
-        (i, j) grid indices of target cell
-    heuristic:
-        A function h(cell1, cell2) that estimates cost from one cell to another
-    cost_fn:
-        Function of (u,v) giving cost to move from u to v
-    connectivity:
-        Can be 4 or 8, depending on if 4 or 8 neighbors
+    grid_map : GridMap
+        Provides `get_neighbors(cell, connectivity)` and collision checks.
+    start, goal : (i, j)
+        Grid indices for start and target.
+    heuristic : callable(u, v) -> float
+        Admissible/consistent estimate from u to v.
+    cost_fn : callable(u, v) -> float
+        Transition cost from u to v.
+    connectivity : int
+        4 or 8 neighbor connectivity.
+    max_expansions : int | None
+        Optional cap on node expansions to avoid runaway searches.
 
-    Returns: 
-        A list of (i, j) cells from the start to goal cell
-        or None if no such path exists
+    Returns
+    -------
+    list[(i, j)] or None
+        Path from start to goal (inclusive), or None if unreachable.
     """
-    # Defines open set as a min-heap of tuples: (f_score, g_score, cell)
-    open_set: List[Tuple[float, float, Tuple[int,int]]] = []
-    heapq.heappush(open_set, (heuristic(start, goal), 0.0, start))
+    # Check for blocked endpoints
+    if not grid_map.is_free(start) or not grid_map.is_free(goal):
+        return None
 
-    came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
-    g_score: Dict[Tuple[int, int], float] = {start: 0.0}
+    # Min-heap entries: (f, g, tie, cell)
+    open_heap: List[Tuple[float, float, int, Cell]] = []
+    tie = itertools.count()
+    g_score: Dict[Cell, float] = {start: 0.0}
+    came_from: Dict[Cell, Cell] = {}
+    closed_set: set[Cell] = set()
 
-    # Main search loop
-    while open_set:
-        # Pop the cell with smalles f_score
-        f_current, g_current, current = heapq.heappop(open_set)
+    h0 = heuristic(start, goal)
+    heapq.heappush(open_heap, (h0, 0.0, next(tie), start))
 
-        # If goal is reached, reconstruct and return path
+    expansions = 0
+
+    while open_heap:
+        f_curr, g_curr, _, current = heapq.heappop(open_heap)
+
+        if current in closed_set:
+            continue
+        closed_set.add(current)
+
         if current == goal:
             return reconstruct_path(came_from, current)
-        
-        # If goal not reached, explore neighbors of current cell
-        for neighbor in grid_map.get_neighbors(current, connectivity):
-                # Compute cost to reach neigbor via current
-                g_tentative = g_current + cost_fn(current, neighbor)
-                
-                # If this path to neighbor is better than any previous one
-                if g_tentative < g_score.get(neighbor, float('inf')): # G score defaulted to infinity
-                     came_from[neighbor] = current 
-                     g_score[neighbor] = g_tentative
-                     f_score = g_tentative + heuristic(neighbor, goal)
-                     heapq.heappush(open_set, (f_score, g_tentative, neighbor))
+
+        expansions += 1
+        if max_expansions is not None and expansions > max_expansions:
+            return None
+
+        for nbr in grid_map.get_neighbors(current, connectivity):
+            if nbr in closed_set:
+                continue
+
+            tentative_g = g_curr + cost_fn(current, nbr)
+            if tentative_g < g_score.get(nbr, float("inf")):
+                g_score[nbr] = tentative_g
+                came_from[nbr] = current
+                f = tentative_g + heuristic(nbr, goal)
+                heapq.heappush(open_heap, (f, tentative_g, next(tie), nbr))
 
     return None
